@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Agenda de Compromissos CRUD</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; padding: 20px; }
+        h2, h3 { color: #333; }
+        #form-cadastro, #form-edicao { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; background-color: #f9f9f9; }
+        label, input, button { display: block; margin-bottom: 10px; }
+        input[type="text"], input[type="date"] { width: calc(100% - 22px); padding: 8px; border: 1px solid #ccc; border-radius: 3px; }
+        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; transition: background-color 0.2s; }
+        button:hover { background-color: #0056b3; }
+        button.editar { background-color: #ffc107; margin-right: 5px; }
+        button.editar:hover { background-color: #e0a800; }
+        button.excluir { background-color: #dc3545; }
+        button.excluir:hover { background-color: #c82333; }
+        button.cancelar { background-color: #6c757d; }
+        button.cancelar:hover { background-color: #5a6268;}
+        #lista-compromissos table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        #lista-compromissos th, #lista-compromissos td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        #lista-compromissos th { background-color: #f2f2f2; }
+        #lista-compromissos tr:nth-child(even) { background-color: #f9f9f9; }
+        .acoes button { display: inline-block; margin-right: 5px; padding: 5px 8px; font-size: 0.9em;}
+        #status { margin-top: 15px; padding: 10px; border-radius: 3px; display: none; /* Oculto por padrão */ }
+        .status-sucesso { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .status-erro { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        /* Estilos básicos para o Modal */
+        .modal { display: none; position: fixed; z-index: 1; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4); }
+        .modal-content { background-color: #fefefe; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 500px; border-radius: 5px; }
+        .close-button { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close-button:hover, .close-button:focus { color: black; text-decoration: none; }
+         /* Input para CPF desabilitado na edição */
+        #cpf_editar { background-color: #e9ecef; cursor: not-allowed; }
+
+    </style>
+</head>
+<body onload="consultarCompromissos()"> <h2>Agenda de Compromissos</h2>
+
+    <div id="status"></div>
+
+    <div id="form-cadastro">
+        <h3>Cadastrar Novo Compromisso</h3>
+        <label for="cpf_cadastrar">CPF da Pessoa (deve existir na tabela pessoa):</label>
+        <input id="cpf_cadastrar" type="text" placeholder="Ex: 111.222.333-44" maxlength="14">
+
+        <label for="data_cadastrar">Data:</label>
+        <input id="data_cadastrar" type="date">
+
+        <label for="descricao_cadastrar">Descrição:</label>
+        <input id="descricao_cadastrar" type="text" placeholder="Descreva o compromisso">
+
+        <button onclick="cadastrarCompromisso()">Salvar Compromisso</button>
+    </div>
+
+     <h3>Compromissos Agendados</h3>
+    <button onclick="consultarCompromissos()">Atualizar Lista</button>
+    <div id="lista-compromissos">
+        <p>Carregando compromissos...</p>
+    </div>
+
+    <div id="modalEdicao" class="modal">
+        <div class="modal-content">
+            <span class="close-button" onclick="fecharModalEdicao()">&times;</span>
+            <h3>Editar Compromisso</h3>
+            <form id="form-edicao" onsubmit="event.preventDefault(); salvarEdicao();">
+                <input type="hidden" id="codigo_editar"> <label for="cpf_editar">CPF (Não editável):</label>
+                 <input id="cpf_editar" type="text" readonly disabled> <label for="data_editar">Data:</label>
+                <input id="data_editar" type="date" required>
+
+                <label for="descricao_editar">Descrição:</label>
+                <input id="descricao_editar" type="text" required>
+
+                <button type="submit">Salvar Alterações</button>
+                <button type="button" class="cancelar" onclick="fecharModalEdicao()">Cancelar</button>
+            </form>
+        </div>
+    </div>
+
+
+    <script>
+        const apiUrl = 'controllerAgenda.php'; // URL base do controller
+        const statusDiv = document.getElementById('status');
+
+        // Função para exibir mensagens de status
+        function mostrarStatus(mensagem, sucesso = true) {
+            statusDiv.textContent = mensagem;
+            statusDiv.className = sucesso ? 'status-sucesso' : 'status-erro';
+            statusDiv.style.display = 'block';
+             // Esconde a mensagem após 5 segundos
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        // Função para formatar CPF (opcional, para exibição)
+        function formatarCPF(cpf) {
+            if (!cpf) return '';
+            cpf = cpf.replace(/\D/g, ''); // Remove não dígitos
+            if (cpf.length === 11) {
+                return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+            }
+            return cpf; // Retorna original se não tiver 11 dígitos
+        }
+
+        // Função para limpar formulário de cadastro
+        function limparFormularioCadastro() {
+            document.getElementById('cpf_cadastrar').value = '';
+            document.getElementById('data_cadastrar').value = '';
+            document.getElementById('descricao_cadastrar').value = '';
+        }
+
+
+        // CADASTRAR (CREATE)
+        async function cadastrarCompromisso() {
+            const cpfInput = document.getElementById('cpf_cadastrar');
+            const dataInput = document.getElementById('data_cadastrar');
+            const descricaoInput = document.getElementById('descricao_cadastrar');
+
+            const cpf = cpfInput.value.replace(/\D/g, ''); // Remove máscara do CPF
+            const data = dataInput.value;
+            const descricao = descricaoInput.value;
+
+            if (!cpf || !data || !descricao) {
+                mostrarStatus("Erro: Preencha todos os campos para cadastrar!", false);
+                return;
+            }
+             if (cpf.length !== 11) {
+                 mostrarStatus("Erro: CPF inválido. Deve conter 11 dígitos.", false);
+                 return;
+             }
+
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ acao: 'inserir', cpf: cpf, data: data, descricao: descricao })
+                });
+
+                const resultado = await response.json();
+
+                if (resultado.sucesso) {
+                    mostrarStatus(resultado.mensagem, true);
+                    limparFormularioCadastro(); // Limpa o formulário
+                    consultarCompromissos(); // Atualiza a lista
+                } else {
+                    mostrarStatus(`Erro ao cadastrar: ${resultado.mensagem}`, false);
+                }
+
+            } catch (error) {
+                console.error('Erro na requisição:', error);
+                mostrarStatus('Erro de comunicação ao tentar cadastrar.', false);
+            }
+        }
+
+        // CONSULTAR (READ)
+        async function consultarCompromissos() {
+            const listaDiv = document.getElementById('lista-compromissos');
+            listaDiv.innerHTML = '<p>Carregando...</p>'; // Feedback visual
+
+            try {
+                const response = await fetch(`${apiUrl}?acao=consultar`); // GET por padrão
+                const resultado = await response.json();
+
+                if (resultado.sucesso && Array.isArray(resultado.dados)) {
+                    if(resultado.dados.length === 0) {
+                         listaDiv.innerHTML = '<p>Nenhum compromisso encontrado.</p>';
+                         return;
+                    }
+
+                    let tabelaHtml = `
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Nome Pessoa</th>
+                                    <th>CPF</th>
+                                    <th>Data</th>
+                                    <th>Descrição</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    `;
+                    resultado.dados.forEach(c => {
+                        // Tratamento para nome e formatação de data/cpf
+                        const nomePessoa = c.nome || '<i>Pessoa não encontrada</i>';
+                         const dataFormatada = c.data ? new Date(c.data + 'T00:00:00').toLocaleDateString('pt-BR') : 'N/A'; // Adiciona T00:00:00 para evitar problemas de fuso horário
+                        const cpfFormatado = formatarCPF(c.cpf);
+
+                        tabelaHtml += `
+                            <tr>
+                                <td>${nomePessoa}</td>
+                                <td>${cpfFormatado}</td>
+                                <td>${dataFormatada}</td>
+                                <td>${c.descricao}</td>
+                                <td class="acoes">
+                                    <button class="editar" onclick="abrirModalEdicao(${c.codigo})">Editar</button>
+                                    <button class="excluir" onclick="excluirCompromisso(${c.codigo})">Excluir</button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    tabelaHtml += '</tbody></table>';
+                    listaDiv.innerHTML = tabelaHtml;
+
+                } else if (!resultado.sucesso) {
+                    listaDiv.innerHTML = `<p class="status-erro">Erro ao carregar: ${resultado.mensagem || 'Não foi possível obter os dados.'}</p>`;
+                }
+                 else {
+                      listaDiv.innerHTML = '<p>Nenhum compromisso cadastrado.</p>'; // Caso dados seja null ou não array
+                 }
+
+            } catch (error) {
+                console.error('Erro na requisição de consulta:', error);
+                 listaDiv.innerHTML = '<p class="status-erro">Erro de comunicação ao buscar compromissos.</p>';
+            }
+        }
+
+         // ABRIR MODAL DE EDIÇÃO (Preenche o formulário com dados atuais)
+        async function abrirModalEdicao(codigo) {
+            try {
+                // Busca os dados do compromisso específico
+                 const response = await fetch(`${apiUrl}?acao=consultar&codigo=${codigo}`);
+                 const resultado = await response.json();
+
+                 if (resultado.sucesso && resultado.dados) {
+                     const c = resultado.dados; // Dados do compromisso
+                     document.getElementById('codigo_editar').value = c.codigo;
+                     document.getElementById('cpf_editar').value = formatarCPF(c.cpf); // Exibe formatado, mas não envia para update
+                     document.getElementById('data_editar').value = c.data; // Formato YYYY-MM-DD
+                     document.getElementById('descricao_editar').value = c.descricao;
+
+                     document.getElementById('modalEdicao').style.display = 'block';
+                 } else {
+                     mostrarStatus(`Erro ao carregar dados para edição: ${resultado.mensagem || 'Compromisso não encontrado.'}`, false);
+                 }
+
+            } catch (error) {
+                 console.error('Erro ao buscar dados para edição:', error);
+                 mostrarStatus('Erro de comunicação ao buscar dados para edição.', false);
+            }
+        }
+
+        // FECHAR MODAL DE EDIÇÃO
+        function fecharModalEdicao() {
+            document.getElementById('modalEdicao').style.display = 'none';
+        }
+
+
+        // SALVAR EDIÇÃO (UPDATE)
+        async function salvarEdicao() {
+            const codigo = document.getElementById('codigo_editar').value;
+            const data = document.getElementById('data_editar').value;
+            const descricao = document.getElementById('descricao_editar').value;
+
+             if (!data || !descricao) {
+                 alert("Preencha a Data e a Descrição!"); // Alert dentro do modal
+                 return;
+             }
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ acao: 'atualizar', codigo: codigo, data: data, descricao: descricao })
+                });
+                const resultado = await response.json();
+
+                 if (resultado.sucesso) {
+                     mostrarStatus(resultado.mensagem, true);
+                     fecharModalEdicao();
+                     consultarCompromissos(); // Atualiza a lista
+                 } else {
+                    // Exibe o erro dentro do modal ou na área de status principal
+                     alert(`Erro ao atualizar: ${resultado.mensagem}`);
+                     // ou mostrarStatus(`Erro ao atualizar: ${resultado.mensagem}`, false);
+                 }
+
+            } catch (error) {
+                 console.error('Erro na requisição de atualização:', error);
+                 alert('Erro de comunicação ao tentar atualizar.');
+                 // ou mostrarStatus('Erro de comunicação ao tentar atualizar.', false);
+            }
+
+        }
+
+        // EXCLUIR (DELETE)
+        async function excluirCompromisso(codigo) {
+            if (!confirm(`Tem certeza que deseja excluir o compromisso código ${codigo}?`)) {
+                return; // Cancela se o usuário não confirmar
+            }
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST', // Usando POST para simplificar, poderia ser DELETE
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ acao: 'excluir', codigo: codigo })
+                });
+
+                const resultado = await response.json();
+
+                if (resultado.sucesso) {
+                    mostrarStatus(resultado.mensagem, true);
+                    consultarCompromissos(); // Atualiza a lista
+                } else {
+                    mostrarStatus(`Erro ao excluir: ${resultado.mensagem}`, false);
+                }
+
+            } catch (error) {
+                 console.error('Erro na requisição de exclusão:', error);
+                mostrarStatus('Erro de comunicação ao tentar excluir.', false);
+            }
+        }
+
+    </script>
+
+</body>
+</html>
